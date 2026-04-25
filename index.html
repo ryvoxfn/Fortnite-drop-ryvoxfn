@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Fortnite Ultimate Drop Planner</title>
+
+<style>
+body { margin:0; background:#020617; color:white; font-family:sans-serif;}
+#topbar {
+  text-align:center;
+  padding:10px;
+  background:#0f172a;
+}
+button {
+  margin:5px;
+  padding:10px;
+  background:#22c55e;
+  border:none;
+  color:white;
+  cursor:pointer;
+  border-radius:6px;
+}
+canvas { display:block; margin:auto; cursor:crosshair; }
+#info { text-align:center; padding:10px; }
+</style>
+</head>
+
+<body>
+
+<div id="topbar">
+<button onclick="mode='start'">Início</button>
+<button onclick="mode='end'">Fim</button>
+<button onclick="mode='drop'">Drop</button>
+<button onclick="reset()">Reset</button>
+</div>
+
+<canvas id="map" width="900" height="900"></canvas>
+<div id="info"></div>
+
+<script>
+const canvas = document.getElementById("map");
+const ctx = canvas.getContext("2d");
+
+let mode="start";
+let start=null,end=null,drop=null;
+
+let scale=1;
+let offsetX=0, offsetY=0;
+
+const BUS_SPEED=30;
+const MAX_FALL_SPEED=60;
+const GLIDER_SPEED=18;
+const MAP_METERS=5000;
+
+// POIs básicos
+const POIS = [
+  {name:"Tilted Towers",x:400,y:450},
+  {name:"Retail Row",x:650,y:500},
+  {name:"Pleasant Park",x:300,y:250},
+];
+
+// mapa real
+const img=new Image();
+img.src="https://i.imgur.com/6R9QZ9H.jpg";
+img.onload=draw;
+
+// zoom
+canvas.addEventListener("wheel",(e)=>{
+  e.preventDefault();
+  scale += e.deltaY * -0.001;
+  scale = Math.min(Math.max(.5, scale), 2);
+  draw();
+});
+
+// pan
+let dragging=false, lastX, lastY;
+canvas.addEventListener("mousedown",(e)=>{
+  dragging=true;
+  lastX=e.clientX;
+  lastY=e.clientY;
+});
+canvas.addEventListener("mouseup",()=>dragging=false);
+canvas.addEventListener("mousemove",(e)=>{
+  if(dragging){
+    offsetX += e.clientX-lastX;
+    offsetY += e.clientY-lastY;
+    lastX=e.clientX;
+    lastY=e.clientY;
+    draw();
+  }
+});
+
+// clique
+canvas.addEventListener("click",(e)=>{
+  const rect=canvas.getBoundingClientRect();
+  const x=(e.clientX-rect.left-offsetX)/scale;
+  const y=(e.clientY-rect.top-offsetY)/scale;
+
+  if(mode==="start") start={x,y};
+  else if(mode==="end") end={x,y};
+  else if(mode==="drop") drop={x,y};
+
+  draw();
+});
+
+function draw(){
+  ctx.setTransform(scale,0,0,scale,offsetX,offsetY);
+  ctx.clearRect(-offsetX,-offsetY,2000,2000);
+  ctx.drawImage(img,0,0,900,900);
+
+  drawPOIs();
+  drawLine(start,end,"white");
+  drawPoint(start,"blue");
+  drawPoint(end,"purple");
+  drawPoint(drop,"red");
+
+  if(start && end && drop){
+    calculate();
+  }
+}
+
+function drawPOIs(){
+  ctx.fillStyle="white";
+  POIS.forEach(p=>{
+    ctx.fillText(p.name,p.x+5,p.y-5);
+  });
+}
+
+function drawPoint(p,c){
+  if(!p) return;
+  ctx.fillStyle=c;
+  ctx.beginPath();
+  ctx.arc(p.x,p.y,6,0,Math.PI*2);
+  ctx.fill();
+}
+
+function drawLine(a,b,c){
+  if(!a||!b) return;
+  ctx.strokeStyle=c;
+  ctx.beginPath();
+  ctx.moveTo(a.x,a.y);
+  ctx.lineTo(b.x,b.y);
+  ctx.stroke();
+}
+
+function calculate(){
+  const dx=end.x-start.x;
+  const dy=end.y-start.y;
+
+  const t=((drop.x-start.x)*dx+(drop.y-start.y)*dy)/(dx*dx+dy*dy);
+
+  const jump={
+    x:start.x+t*dx,
+    y:start.y+t*dy
+  };
+
+  drawPoint(jump,"yellow");
+  drawLine(jump,drop,"yellow");
+
+  const dist=pxToMeters(distance(jump,drop));
+
+  // velocidade dinâmica (ângulo influencia)
+  const angle = Math.atan2(drop.y-jump.y, drop.x-jump.x);
+  const fallSpeed = MAX_FALL_SPEED * (0.7 + 0.3*Math.abs(Math.sin(angle)));
+
+  // terreno melhor simulado
+  const terrain = 100 + Math.sin(drop.x*0.02)*80 + Math.cos(drop.y*0.02)*60;
+
+  const glideDist=300 + terrain*0.2;
+
+  const fallDist=dist-glideDist;
+
+  const fallTime=fallDist/fallSpeed;
+  const glideTime=glideDist/GLIDER_SPEED;
+
+  const total=fallTime+glideTime;
+
+  const glidePoint=interpolate(jump,drop,fallDist/dist);
+
+  drawPoint(glidePoint,"green");
+
+  document.getElementById("info").innerHTML=`
+  ⏱️ Tempo: ${total.toFixed(2)}s<br>
+  📏 Distância: ${dist.toFixed(0)}m<br>
+  🪂 Abrir glider: ${glideDist.toFixed(0)}m<br>
+  ⛰️ Altura estimada: ${terrain.toFixed(0)}m<br>
+  📐 Velocidade queda: ${fallSpeed.toFixed(1)} m/s
+  `;
+}
+
+function distance(a,b){
+  return Math.hypot(a.x-b.x,a.y-b.y);
+}
+
+function pxToMeters(px){
+  return px*(MAP_METERS/900);
+}
+
+function interpolate(a,b,t){
+  return {
+    x:a.x+(b.x-a.x)*t,
+    y:a.y+(b.y-a.y)*t
+  };
+}
+
+function reset(){
+  start=end=drop=null;
+  draw();
+}
+</script>
+
+</body>
+</html>
